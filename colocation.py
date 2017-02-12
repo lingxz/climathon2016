@@ -116,6 +116,57 @@ def reverse_no2(NO2_working=None, NO2_aux=None, ppbNO2=None):
     return raw_NO2_working_1, raw_NO2_aux
 
 
+def compare(ds_merged, airpublic_measure, kings_measure):
+    ds_merged_one = ds_merged[[airpublic_measure, kings_measure]]
+    # ds_merged_one['error'] = ds_merged_one[kings_measure] - ds_merged[airpublic_measure]
+    # ds_merged_one.sel(datetime=example_date).to_dataframe().plot()
+    ds_merged_one.to_dataframe().plot()
+    sns.pairplot(ds_merged_one.to_dataframe().dropna().reset_index(), vars=ds_merged_one.data_vars)
+    print(ds_merged_one.to_dataframe().describe())
+    # calculate r2 score
+    r2 = r2_score(ds_merged_one.to_dataframe().dropna()[airpublic_measure],
+                  ds_merged_one.to_dataframe().dropna()[kings_measure])
+    print("r2 score: ", r2)
+
+    # KS-test
+    ks_statistic, p_value = scipy.stats.ks_2samp(ds_merged_one.to_dataframe().dropna()[airpublic_measure],
+                                                 ds_merged_one.to_dataframe().dropna()[kings_measure])
+    print("Probability that they belong to the same distribution (KS p-value): ", p_value)
+
+
+def linear_regr_fudge(ds_merged, airpublic_measure, kings_measure, test_size=0.2, split='random'):
+    if split not in ['random', 'chronological']:
+        raise ValueError("splitting method should either be random or chronological")
+    df_merged_temp = ds_merged.to_dataframe().dropna(subset=[kings_measure, airpublic_measure])
+    if split == 'random':
+        kings_train, kings_test, ap_train, ap_test = \
+            train_test_split(df_merged_temp[kings_measure], df_merged_temp[airpublic_measure], test_size=test_size)
+    else:
+        kings_train, kings_test, ap_train, ap_test = \
+            chronological_split(df_merged_temp[kings_measure], df_merged_temp[airpublic_measure], test_size=test_size)
+
+    regr = linear_model.LinearRegression()
+
+    # Train the model using the training sets
+    regr.fit(reshape(ap_train), reshape(kings_train))
+    # The coefficients
+    print('Coefficients: \n', regr.coef_, regr.intercept_)
+    # The mean squared error
+    print("Mean squared error: %.2f"
+          % np.mean((regr.predict(reshape(ap_test)) - reshape(kings_test)) ** 2))
+    # Explained variance score: 1 is perfect prediction
+    print('Variance score: %.2f' % regr.score(reshape(ap_test), reshape(kings_test)))
+    scores = cross_val_score(regr, reshape(ap_test), reshape(kings_test), scoring='r2')
+    print("R2 score: %.3f" % scores[0])
+
+    plt.scatter(ap_test, kings_test, color='black')
+    plt.scatter(ap_train, kings_train, color='red')
+    plt.plot(reshape(ap_train), regr.predict(reshape(ap_train)), color='blue',
+             linewidth=1)
+    plt.show()
+    return regr.coef_, regr.intercept_
+
+
 class Colocation:
 
     def __init__(self, df, kings_df):
@@ -162,52 +213,7 @@ class Colocation:
 
     def compare(self, airpublic_measure, kings_measure):
         ds_merged = self.ds
-        ds_merged_one = ds_merged[[airpublic_measure, kings_measure]]
-        # ds_merged_one['error'] = ds_merged_one[kings_measure] - ds_merged[airpublic_measure]
-        # ds_merged_one.sel(datetime=example_date).to_dataframe().plot()
-        ds_merged_one.to_dataframe().plot()
-        sns.pairplot(ds_merged_one.to_dataframe().dropna().reset_index(), vars=ds_merged_one.data_vars)
-        print(ds_merged_one.to_dataframe().describe())
-        # calculate r2 score
-        r2 = r2_score(ds_merged_one.to_dataframe().dropna()[airpublic_measure],
-                      ds_merged_one.to_dataframe().dropna()[kings_measure])
-        print("r2 score: ", r2)
-
-        # KS-test
-        ks_statistic, p_value = scipy.stats.ks_2samp(ds_merged_one.to_dataframe().dropna()[airpublic_measure],
-                                                     ds_merged_one.to_dataframe().dropna()[kings_measure])
-        print("Probability that they belong to the same distribution (KS p-value): ", p_value)
-
-
+        compare(ds_merged, airpublic_measure, kings_measure)
 
     def linear_regr_fudge(self, airpublic_measure, kings_measure, test_size=0.2, split='random'):
-        if split not in ['random', 'chronological']:
-            raise ValueError("splitting method should either be random or chronological")
-        ds_merged = self.ds
-        df_merged_temp = ds_merged.to_dataframe().dropna(subset=[kings_measure, airpublic_measure])
-        if split == 'random':
-            kings_train, kings_test, ap_train, ap_test = \
-                train_test_split(df_merged_temp[kings_measure], df_merged_temp[airpublic_measure], test_size=test_size)
-        else:
-            kings_train, kings_test, ap_train, ap_test = \
-                chronological_split(df_merged_temp[kings_measure], df_merged_temp[airpublic_measure], test_size=test_size)
-
-        regr = linear_model.LinearRegression()
-
-        # Train the model using the training sets
-        regr.fit(reshape(ap_train), reshape(kings_train))
-        # The coefficients
-        print('Coefficients: \n', regr.coef_, regr.intercept_)
-        # The mean squared error
-        print("Mean squared error: %.2f"
-              % np.mean((regr.predict(reshape(ap_test)) - reshape(kings_test)) ** 2))
-        # Explained variance score: 1 is perfect prediction
-        print('Variance score: %.2f' % regr.score(reshape(ap_test), reshape(kings_test)))
-        scores = cross_val_score(regr, reshape(ap_test), reshape(kings_test), scoring='r2')
-        print("R2 score: %.3f" % scores[0])
-
-        plt.scatter(ap_test, kings_test, color='black')
-        plt.scatter(ap_train, kings_train, color='red')
-        plt.plot(reshape(ap_train), regr.predict(reshape(ap_train)), color='blue',
-                 linewidth=1)
-        plt.show()
+        linear_regr_fudge(self.ds, airpublic_measure, kings_measure, test_size=0.2, split='random')
