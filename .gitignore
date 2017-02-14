@@ -89,3 +89,5 @@ ENV/
 .ropeproject
 
 12feb_morning\.csv
+
+\.idea/
