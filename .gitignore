@@ -91,3 +91,5 @@ ENV/
 12feb_morning\.csv
 
 \.idea/
+
+tail_f_data/
